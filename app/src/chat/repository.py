@@ -1,10 +1,11 @@
+from sqlalchemy import func
 from sqlalchemy.orm import Session
 
 from src.chat.models import Conversation, Message
 
 
 def create_conversation(db: Session, user_id: int) -> Conversation:
-    conversation = Conversation(user_id=user_id)
+    conversation = Conversation(user_id=user_id, title="Novo chat")
     db.add(conversation)
     db.commit()
     db.refresh(conversation)
@@ -15,9 +16,54 @@ def get_conversation(db: Session, conversation_id: int) -> Conversation | None:
     return db.query(Conversation).filter(Conversation.id == conversation_id).first()
 
 
+def get_conversations_by_user(db: Session, user_id: int) -> list[Conversation]:
+    return (
+        db.query(Conversation)
+        .filter(Conversation.user_id == user_id)
+        .order_by(Conversation.updated_at.desc())
+        .all()
+    )
+
+
+def count_messages(db: Session, conversation_id: int) -> int:
+    return (
+        db.query(func.count(Message.id))
+        .filter(Message.conversation_id == conversation_id)
+        .scalar()
+        or 0
+    )
+
+
+def get_last_n_messages(db: Session, conversation_id: int, n: int) -> list[Message]:
+    subquery = (
+        db.query(Message)
+        .filter(Message.conversation_id == conversation_id)
+        .order_by(Message.id.desc())
+        .limit(n)
+        .subquery()
+    )
+    return (
+        db.query(Message)
+        .filter(Message.id.in_(db.query(subquery.c.id)))
+        .order_by(Message.id.asc())
+        .all()
+    )
+
+
 def add_message(db: Session, conversation_id: int, role: str, content: str) -> Message:
     message = Message(conversation_id=conversation_id, role=role, content=content)
     db.add(message)
+    db.flush()
+
+    # touch updated_at on the parent conversation
+    db.query(Conversation).filter(Conversation.id == conversation_id).update(
+        {"updated_at": func.now()}
+    )
     db.commit()
     db.refresh(message)
     return message
+
+
+def update_conversation_title(db: Session, conversation_id: int, title: str) -> None:
+    db.query(Conversation).filter(Conversation.id == conversation_id).update({"title": title})
+    db.commit()

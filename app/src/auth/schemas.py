@@ -1,14 +1,15 @@
 from pydantic import BaseModel, EmailStr
 
 
-class UserCreate(BaseModel):
-    email: EmailStr
-    password: str
+class GoogleLoginPayload(BaseModel):
+    id_token: str
 
 
 class UserOut(BaseModel):
     id: int
     email: EmailStr
+    name: str | None
+    picture: str | None
 
     model_config = {"from_attributes": True}
 
