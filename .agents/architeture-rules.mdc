@@ -1,0 +1,138 @@
+---
+description: Regras de arquitetura do backend ISCTools — aplicar sempre que criar, editar ou revisar código em app/src/
+globs: app/src/**/*.py
+alwaysApply: true
+---
+
+# Regras de Arquitetura — ISCTools Backend
+
+## Estrutura de diretórios
+
+```
+backend/                  ← raiz do repositório
+├── .agentes/             ← regras e contexto para agentes de IA
+├── docs/                 ← documentação
+├── .gitignore
+└── app/                  ← todo o código do projeto
+    ├── src/
+    │   ├── main.py       ← ponto de entrada da aplicação
+    │   ├── core/         ← infraestrutura compartilhada
+    │   ├── auth/         ← módulo de autenticação
+    │   └── chat/         ← módulo de chat com IA
+    ├── alembic/
+    ├── alembic.ini
+    ├── docker-compose.yml
+    ├── Dockerfile
+    ├── Makefile
+    └── requirements.txt
+```
+
+A raiz do repositório é exclusiva para separação de contextos (docs, agentes). Nenhum código de aplicação vai na raiz.
+
+---
+
+## Organização por módulo (feature-based)
+
+Cada domínio da aplicação é um módulo autossuficiente dentro de `src/`. Módulos atuais: `auth`, `chat`.
+
+Todo módulo segue esta estrutura fixa:
+
+```
+<modulo>/
+├── __init__.py
+├── models.py      ← entidades ORM (SQLAlchemy)
+├── schemas.py     ← contratos de entrada/saída (Pydantic)
+├── repository.py  ← acesso ao banco de dados
+├── service.py     ← regras de negócio
+└── router.py      ← rotas HTTP (FastAPI)
+```
+
+Não criar subpastas dentro de um módulo. Se a complexidade exigir divisão, criar um novo módulo.
+
+---
+
+## Responsabilidades por camada
+
+### `models.py`
+- Define tabelas e relacionamentos com SQLAlchemy (estilo `Mapped`/`mapped_column`).
+- Sem lógica de negócio. Sem imports de outros módulos da aplicação além de `src.core.database.Base`.
+
+### `schemas.py`
+- Define schemas Pydantic para request bodies e response models.
+- Sem acesso ao banco. Sem imports de `models.py`.
+- Schemas de saída sempre com `model_config = {"from_attributes": True}` quando mapeiam um ORM model.
+
+### `repository.py`
+- Única camada que toca a `Session` do SQLAlchemy.
+- Funções recebem `db: Session` como primeiro argumento.
+- Sem lógica de negócio: não lança `ValueError`, não valida regras de domínio.
+- Retorna objetos ORM ou `None`. Nunca levanta `HTTPException`.
+
+### `service.py`
+- Orquestra chamadas ao `repository` e aplica regras de negócio.
+- Lança `ValueError` para erros de domínio (ex: "Email já cadastrado").
+- Não conhece HTTP: sem `Request`, sem `HTTPException`, sem códigos de status.
+- Pode importar o `repository` do próprio módulo. Evitar importar repositórios de outros módulos.
+
+### `router.py`
+- Traduz HTTP ↔ service: recebe request, chama service, retorna response.
+- Captura `ValueError` do service e converte em `HTTPException`.
+- Usa `Depends(get_db)` para injetar a sessão do banco.
+- Prefixo e tags definidos no próprio router, não no `main.py`.
+
+### `core/config.py`
+- Única fonte de configuração da aplicação via `pydantic-settings`.
+- Variáveis de ambiente lidas do `.env`. Campos extras ignorados (`extra = "ignore"`).
+
+### `core/database.py`
+- Define `engine`, `SessionLocal`, `Base` e o dependency `get_db`.
+- Não importado diretamente por routers ou services — apenas por `models.py` (Base) e `repository.py` (Session via Depends).
+
+---
+
+## Registro de routers
+
+Todo router novo deve ser registrado em `src/main.py` com `app.include_router(...)`.
+
+```python
+# src/main.py
+app.include_router(auth_router)
+app.include_router(chat_router)
+```
+
+---
+
+## Migrations (Alembic)
+
+- Cada novo `models.py` deve ter seus models importados em `alembic/env.py` para que o autogenerate detecte as mudanças:
+
+```python
+# alembic/env.py
+import src.auth.models   # noqa: F401
+import src.chat.models   # noqa: F401
+```
+
+- Migrations geradas com:
+  ```
+  make migration name="descricao_da_mudanca"
+  ```
+- Nunca editar migrations já aplicadas em produção.
+
+---
+
+## Criação de um novo módulo
+
+1. Criar pasta `src/<modulo>/` com os 5 arquivos (`__init__.py`, `models.py`, `schemas.py`, `repository.py`, `service.py`, `router.py`).
+2. Importar o model em `alembic/env.py`.
+3. Registrar o router em `src/main.py`.
+4. Gerar a migration com `make migration name="add_<modulo>"`.
+
+---
+
+## O que não fazer
+
+- Não colocar lógica de negócio em `router.py` ou `repository.py`.
+- Não acessar a `Session` diretamente em `service.py` (passar como argumento vindo do router via `Depends`).
+- Não criar arquivos fora da estrutura de módulo (ex: `src/utils.py` genérico). Se for compartilhado, vai em `src/core/`.
+- Não importar `HTTPException` fora de `router.py`.
+- Não criar código novo na raiz do repositório.
