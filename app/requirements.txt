@@ -11,3 +11,5 @@ psycopg2-binary==2.9.9
 langgraph>=0.3.0
 langchain-google-genai>=2.1.0
 langchain-core>=0.3.0
+pgvector>=0.3.0
+langsmith>=0.2.0

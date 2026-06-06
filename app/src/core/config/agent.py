@@ -4,10 +4,13 @@ from pydantic import Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 _DEFAULT_MODELS = json.dumps([
-    {"id": "gemini-2.0-flash", "alias": "Gemini 2.0 Flash"},
+    {"id": "gemini-3.1-pro-preview", "alias": "Gemini 3.1 Pro Preview"},
+    {"id": "gemini-3.5-flash", "alias": "Gemini 3.5 Flash"},
+    {"id": "gemini-3-flash-preview", "alias": "Gemini 3 Flash Preview"},
+    {"id": "gemini-3.1-flash-lite", "alias": "Gemini 3.1 Flash Lite"},
+    {"id": "gemini-2.5-flash", "alias": "Gemini 2.5 Flash"},
     {"id": "gemini-2.5-flash-lite", "alias": "Gemini 2.5 Flash Lite"},
-    {"id": "gemini-1.5-flash", "alias": "Gemini 1.5 Flash"},
-    {"id": "gemini-1.5-pro", "alias": "Gemini 1.5 Pro"},
+    {"id": "gemini-2.5-pro", "alias": "Gemini 2.5 Pro"}
 ])
 
 

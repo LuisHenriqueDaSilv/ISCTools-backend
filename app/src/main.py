@@ -11,6 +11,8 @@ from src.core.config import settings
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     settings.validate_api_settings()
+    if settings.langsmith.tracing and not settings.langsmith.api_key:
+        raise RuntimeError("LANGSMITH_TRACING=true mas LANGSMITH_API_KEY não está definido.")
     yield
 
 

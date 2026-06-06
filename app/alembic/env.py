@@ -12,6 +12,7 @@ from src.core.config import settings
 from src.core.database import Base
 import src.auth.models  # noqa: F401
 import src.chat.models  # noqa: F401
+import src.knowledge.models  # noqa: F401
 
 config = context.config
 

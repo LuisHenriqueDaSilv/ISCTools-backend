@@ -1,6 +1,9 @@
 import struct
 
 from langchain_core.tools import tool
+from sqlalchemy.orm import Session
+
+from src.knowledge import service as knowledge_service
 
 _SIMBOLOS = "0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ"
 
@@ -540,5 +543,263 @@ def imme_calc(value: str, format_type: str, input_type: str = "byte", base: int 
         return f"Formato desconhecido: '{format_type}'. Use 'B' ou 'J'."
 
 
-def get_tools() -> list:
-    return [assembler, disassembler, base_converter, float_to_ieee754, ieee754_to_float, imme_calc]
+def _validate_base(base: int) -> str | None:
+    if not (2 <= base <= 36):
+        return "Base inválida: deve estar entre 2 e 36."
+    return None
+
+
+def _validate_digits(num: str, base: int) -> str | None:
+    domain = set(_SIMBOLOS[:base])
+    for ch in num:
+        if ch not in domain:
+            return f"Caractere inválido '{ch}' para base {base}."
+    return None
+
+
+def _parse_signed(num: str) -> tuple[int, str]:
+    if num.startswith("-"):
+        return -1, num[1:]
+    return 1, num
+
+
+def _sum_magnitudes(mags: list[str], base: int) -> tuple[list[int], list[int]]:
+    """Return (result_digits, carry_digits) for column-by-column sum."""
+    width = max(len(m) for m in mags)
+    padded = [m.zfill(width) for m in mags]
+    result = []
+    carries = []
+    carry = 0
+    for col in range(width - 1, -1, -1):
+        total = carry + sum(_SIMBOLOS.index(p[col]) for p in padded)
+        result.append(total % base)
+        carry = total // base
+        carries.append(carry)
+    if carry > 0:
+        result.append(carry)
+        carries.append(0)
+    result.reverse()
+    carries.reverse()
+    return result, carries
+
+
+def _digits_to_str(digits: list[int]) -> str:
+    return "".join(_SIMBOLOS[d] for d in digits)
+
+
+def _add_magnitudes_raw(a: str, b: str, base: int) -> str:
+    result_digits, _ = _sum_magnitudes([a, b], base)
+    return _digits_to_str(result_digits)
+
+
+def _multiply_mag_by_digit(mag: str, digit_val: int, base: int) -> str:
+    result = []
+    carry = 0
+    for ch in reversed(mag):
+        prod = _SIMBOLOS.index(ch) * digit_val + carry
+        result.append(prod % base)
+        carry = prod // base
+    while carry > 0:
+        result.append(carry % base)
+        carry //= base
+    result.reverse()
+    return _digits_to_str(result) if result else "0"
+
+
+@tool
+def base_add(operands: list[str], base: int) -> str:
+    """Soma N números em uma base qualquer, exibindo o passo a passo com linha de carry.
+
+    Args:
+        operands: Lista de números a somar, como strings na base indicada.
+                  Use prefixo '-' para negativos (ex: '-1011').
+        base: Base numérica comum a todos os operandos (2 a 36).
+    """
+    err = _validate_base(base)
+    if err:
+        return err
+    if len(operands) < 2:
+        return "Informe ao menos dois operandos."
+
+    parsed = []
+    for op in operands:
+        op = op.upper().strip()
+        sign, mag = _parse_signed(op)
+        verr = _validate_digits(mag, base)
+        if verr:
+            return verr
+        parsed.append((sign, mag))
+
+    signs = [s for s, _ in parsed]
+
+    if len(set(signs)) > 1:
+        total = sum(sign * int(mag, base) for sign, mag in parsed)
+        result_sign = "-" if total < 0 else ""
+        result_str = _int_to_base(abs(total), base) if total != 0 else "0"
+        label = {2: "binário", 8: "octal", 10: "decimal", 16: "hexadecimal"}.get(base, f"base {base}")
+        expr = " + ".join((f"(-{mag})" if s == -1 else mag) for s, mag in parsed)
+        return (
+            "Operandos de sinais opostos — soma realizada via conversão decimal intermediária.\n"
+            f"{expr} = {result_sign}{result_str} ({label})"
+        )
+
+    common_sign = signs[0]
+    mags = [mag for _, mag in parsed]
+    result_digits, carries = _sum_magnitudes(mags, base)
+    result_str = _digits_to_str(result_digits)
+
+    # --- format grid ---
+    cell = max(2, len(_SIMBOLOS[base - 1]) + 1)
+    op_width = max(len(m) for m in mags)
+    padded = [m.zfill(op_width) for m in mags]
+    has_extra = len(result_str) > op_width
+    extra_area = (len(result_str) - op_width) * cell if has_extra else 0
+
+    def fmt_digits(s: str, width: int) -> str:
+        return "".join(c.rjust(cell) for c in s.zfill(width))
+
+    # All number rows are right-aligned: rightmost digit at same column.
+    # Operator column (1 char: " " or "+") sits immediately left of digits.
+    # Operand rows: operator + extra_area_spaces + op_width digits
+    # Result row:   sign_char + result_len digits  (auto-right-aligned)
+    op_digits_part = lambda m: " " * extra_area + fmt_digits(m, op_width)
+    num_row_width = 1 + extra_area + op_width * cell  # same as 1 + len(result)
+
+    # carries[1:] = carry-outs for op_width cols (when has_extra, carries[0]=0 is padding)
+    carry_display = carries[1:] if has_extra else carries
+    all_zero = all(c == 0 for c in carry_display)
+
+    lines = []
+    if not all_zero:
+        # carry values right-align over op columns; "  Carry:" is a left label
+        carry_vals = "".join(str(c).rjust(cell) for c in carry_display)
+        # pad so carry values align with op digit columns
+        carry_line = "  Carry:" + " " * (num_row_width - 8 - len(carry_vals) + extra_area) + carry_vals
+        lines.append(carry_line)
+
+    lines.append(" " + op_digits_part(padded[0]))
+    for mag in padded[1:]:
+        lines.append("+" + op_digits_part(mag))
+
+    lines.append("-" * num_row_width)
+
+    result_sign = "-" if common_sign == -1 else " "
+    lines.append(result_sign + fmt_digits(result_str, len(result_str)))
+
+    return "\n".join(lines)
+
+
+@tool
+def base_multiply(a: str, b: str, base: int) -> str:
+    """Multiplica dois números em uma base qualquer, exibindo produtos parciais.
+
+    Args:
+        a: Primeiro operando como string na base indicada. Use '-' para negativo.
+        b: Segundo operando como string na base indicada. Use '-' para negativo.
+        base: Base numérica dos operandos (2 a 36).
+    """
+    err = _validate_base(base)
+    if err:
+        return err
+
+    a = a.upper().strip()
+    b = b.upper().strip()
+    sign_a, mag_a = _parse_signed(a)
+    sign_b, mag_b = _parse_signed(b)
+
+    verr = _validate_digits(mag_a, base)
+    if verr:
+        return verr
+    verr = _validate_digits(mag_b, base)
+    if verr:
+        return verr
+
+    result_sign = -1 if sign_a != sign_b else 1
+    cell = max(2, len(_SIMBOLOS[base - 1]) + 1)
+
+    partials = []
+    for i, ch in enumerate(reversed(mag_b)):
+        digit_val = _SIMBOLOS.index(ch)
+        prod = _multiply_mag_by_digit(mag_a, digit_val, base)
+        partials.append((prod, digit_val, i))
+
+    total = 0
+    for prod_str, _, shift in partials:
+        total += int(prod_str, base) * (base ** shift)
+    result_str = _int_to_base(total, base) if total != 0 else "0"
+
+    # total_width covers partial products and result; op_width covers the header
+    total_width = max(len(result_str), max(len(p) + s for p, _, s in partials))
+    op_width = max(len(mag_a), len(mag_b))
+
+    def fmt_op(s: str) -> str:
+        return "".join(c.rjust(cell) for c in s.zfill(op_width))
+
+    def fmt_full(s: str) -> str:
+        return "".join(c.rjust(cell) for c in s.zfill(total_width))
+
+    # headers are right-aligned within total_width display
+    h_indent = " " * ((total_width - op_width) * cell)
+    lines = []
+    lines.append(h_indent + " " + fmt_op(mag_a))
+    lines.append(h_indent + "×" + fmt_op(mag_b))
+    lines.append(h_indent + " " + "-" * (op_width * cell + 1))
+
+    for prod_str, digit_val, shift in partials:
+        left_pad = total_width - len(prod_str) - shift
+        row = (" " * left_pad * cell
+               + "".join(c.rjust(cell) for c in prod_str)
+               + " " * shift * cell)
+        comment = f"  (× {_SIMBOLOS[digit_val]}, shift {shift})"
+        lines.append(" " + row + comment)
+
+    lines.append(" " + "-" * (total_width * cell + 3))
+    prefix = "-" if result_sign == -1 else " "
+    lines.append(prefix + fmt_full(result_str))
+
+    return "\n".join(lines)
+
+
+def make_search_knowledge(db: Session, api_key: str):
+    @tool
+    def search_knowledge(
+        query: str,
+        source_type: str | None = None,
+        video_source: str | None = None,
+    ) -> str:
+        """Busca trechos relevantes nos materiais da disciplina (aulas OAC e vídeos ISC).
+        Use sempre que o estudante referenciar conteúdo de aula, pedir exemplos do professor
+        ou mencionar "o professor falou", "nas aulas", "nos vídeos". Prefira sempre buscar
+        antes de responder com conhecimento próprio sobre os materiais do curso.
+
+        Args:
+            query: Pergunta ou termo de busca em linguagem natural.
+            source_type: Filtro opcional — "aulas_oac" ou "youtube_isc".
+            video_source: Filtro opcional — nome do arquivo de vídeo (ex: "OAC_2022-01-17.mp4").
+        """
+        results = knowledge_service.search(db, query, api_key, source_type=source_type, video_source=video_source)
+        if not results:
+            return "Nenhum trecho relevante encontrado nos materiais da disciplina."
+        parts = []
+        for i, r in enumerate(results, 1):
+            parts.append(
+                f"[{i}] {r['video_source']} ({r['source_type']}) "
+                f"[{r['timestamp_start']:.1f}s – {r['timestamp_end']:.1f}s]\n{r['content']}"
+            )
+        return "\n\n---\n\n".join(parts)
+
+    return search_knowledge
+
+
+def get_tools(db: Session, api_key: str) -> list:
+    return [
+        assembler,
+        disassembler,
+        base_converter,
+        float_to_ieee754,
+        ieee754_to_float,
+        imme_calc,
+        base_add,
+        base_multiply,
+        make_search_knowledge(db, api_key),
+    ]

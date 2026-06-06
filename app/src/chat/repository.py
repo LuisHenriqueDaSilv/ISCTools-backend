@@ -1,7 +1,7 @@
 from sqlalchemy import func
 from sqlalchemy.orm import Session
 
-from src.chat.models import Conversation, Message
+from src.chat.models import Conversation, Message, ToolCall
 
 
 def create_conversation(db: Session, user_id: int) -> Conversation:
@@ -12,7 +12,16 @@ def create_conversation(db: Session, user_id: int) -> Conversation:
     return conversation
 
 
-def get_conversation(db: Session, conversation_id: int) -> Conversation | None:
+def get_empty_conversation_by_user(db: Session, user_id: int) -> Conversation | None:
+    return (
+        db.query(Conversation)
+        .filter(Conversation.user_id == user_id)
+        .filter(~Conversation.messages.any())
+        .first()
+    )
+
+
+def get_conversation(db: Session, conversation_id: str) -> Conversation | None:
     return db.query(Conversation).filter(Conversation.id == conversation_id).first()
 
 
@@ -25,7 +34,7 @@ def get_conversations_by_user(db: Session, user_id: int) -> list[Conversation]:
     )
 
 
-def count_messages(db: Session, conversation_id: int) -> int:
+def count_messages(db: Session, conversation_id: str) -> int:
     return (
         db.query(func.count(Message.id))
         .filter(Message.conversation_id == conversation_id)
@@ -34,7 +43,7 @@ def count_messages(db: Session, conversation_id: int) -> int:
     )
 
 
-def get_last_n_messages(db: Session, conversation_id: int, n: int) -> list[Message]:
+def get_last_n_messages(db: Session, conversation_id: str, n: int) -> list[Message]:
     subquery = (
         db.query(Message)
         .filter(Message.conversation_id == conversation_id)
@@ -50,8 +59,45 @@ def get_last_n_messages(db: Session, conversation_id: int, n: int) -> list[Messa
     )
 
 
-def add_message(db: Session, conversation_id: int, role: str, content: str) -> Message:
-    message = Message(conversation_id=conversation_id, role=role, content=content)
+def get_last_user_message(db: Session, conversation_id: str) -> Message | None:
+    return (
+        db.query(Message)
+        .filter(Message.conversation_id == conversation_id, Message.role == "user")
+        .order_by(Message.id.desc())
+        .first()
+    )
+
+
+def get_error_message_after(db: Session, conversation_id: str, after_id: int) -> Message | None:
+    return (
+        db.query(Message)
+        .filter(
+            Message.conversation_id == conversation_id,
+            Message.id > after_id,
+            Message.is_error == True,  # noqa: E712
+        )
+        .order_by(Message.id.asc())
+        .first()
+    )
+
+
+def add_message(
+    db: Session,
+    conversation_id: str,
+    role: str,
+    content: str,
+    llm_model: str | None = None,
+    is_error: bool = False,
+    error_code: str | None = None,
+) -> Message:
+    message = Message(
+        conversation_id=conversation_id,
+        role=role,
+        content=content,
+        llm_model=llm_model,
+        is_error=is_error,
+        error_code=error_code,
+    )
     db.add(message)
     db.flush()
 
@@ -64,6 +110,12 @@ def add_message(db: Session, conversation_id: int, role: str, content: str) -> M
     return message
 
 
-def update_conversation_title(db: Session, conversation_id: int, title: str) -> None:
+def add_tool_calls(db: Session, message_id: int, calls: list[dict]) -> None:
+    for call in calls:
+        db.add(ToolCall(message_id=message_id, name=call["name"], input=call["input"], output=call["output"]))
+    db.commit()
+
+
+def update_conversation_title(db: Session, conversation_id: str, title: str) -> None:
     db.query(Conversation).filter(Conversation.id == conversation_id).update({"title": title})
     db.commit()
