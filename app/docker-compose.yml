@@ -33,16 +33,14 @@ services:
   api:
     build: .
     ports:
-      - "8000:8000"
-    env_file:
-      - .env
+      - "${PORT}:${PORT}"
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      POSTGRES_DB: ${POSTGRES_DB}
+      PORT: ${PORT}
     volumes:
       - .:/app
-    depends_on:
-      db:
-        condition: service_healthy
-      migrate:
-        condition: service_completed_successfully
 
 volumes:
   postgres_data:
