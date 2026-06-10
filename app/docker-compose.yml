@@ -37,6 +37,16 @@ services:
       PORT: ${PORT:-8000}
     volumes:
       - .:/app
+    networks:
+      - default
+      - coolify
+    labels:
+      - "traefik.enable=true"
+      - "traefik.http.services.isctools-api.loadbalancer.server.port=${PORT:-8000}"
+
+networks:
+  coolify:
+    external: true
 
 volumes:
   postgres_data:
