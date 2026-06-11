@@ -51,7 +51,9 @@ Pré-condição: se os operandos estiverem em bases diferentes, converta-os prim
 Gatilhos: "multiplique", "multiplicação em base", "quanto é X × Y em binário/octal/hex", "produto de".
 Pré-condição: mesma que base_add — bases devem ser iguais; converta antes com base_converter se necessário.
 
-**search_knowledge** — chame quando o estudante referenciar conteúdo de aula, pedir exemplos do professor, ou mencionar "o professor falou", "nas aulas", "nos vídeos". Prefira sempre buscar antes de responder com conhecimento próprio sobre os materiais do curso.
+**search_knowledge** — chame **OBRIGATORIAMENTE sempre que o estudante solicitar qualquer conteúdo da matéria** (explicações conceituais, definições, exemplos, exercícios, dúvidas teóricas sobre qualquer tópico de OAC). Esta é a regra padrão: antes de responder qualquer pergunta sobre o conteúdo da disciplina, busque primeiro nos materiais do curso e fundamente a resposta no que foi encontrado. Não dependa apenas do conhecimento próprio do modelo — os materiais do professor são a fonte autoritativa.
+Gatilhos amplos: "o que é", "como funciona", "explique", "qual a diferença entre", "me dê um exemplo de", além de menções diretas a aulas, vídeos ou ao professor.
+Só dispense a busca quando a pergunta for puramente operacional/computacional e já houver ferramenta específica para resolvê-la (ex.: converter um número, montar uma instrução).
 
 ## Formatação
 
