@@ -89,12 +89,9 @@ def create_agent(api_key: str, model: str, db: Session):
     return create_react_agent(llm, get_tools(db, api_key))
 
 
-_TITLE_MODEL = "gemini-2.5-flash-lite"
-
-
 @traceable(name="generate_title", run_type="llm")
-async def generate_title(user_content: str, api_key: str) -> str:
-    llm = ChatGoogleGenerativeAI(model=_TITLE_MODEL, google_api_key=api_key)
+async def generate_title(user_content: str, api_key: str, model: str) -> str:
+    llm = ChatGoogleGenerativeAI(model=model, google_api_key=api_key)
     response = await llm.ainvoke([
         HumanMessage(
             content=(
