@@ -9,20 +9,35 @@ from src.chat import service
 from src.chat.schemas import (
     ConversationOut,
     ConversationSummary,
-    GeminiModelOption,
-    RetryMessage,
+    ModelOption,
+    ModelToggle,
     SendMessage,
 )
-from src.core.config import settings
 from src.core.database import get_db
 from src.core.dependencies import get_current_user
 
 router = APIRouter(prefix="/chat", tags=["chat"])
 
 
-@router.get("/models", response_model=list[GeminiModelOption])
-def list_models():
-    return settings.agent.get_models()
+@router.get("/models", response_model=list[ModelOption])
+def list_models(
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    return service.get_user_models(db, current_user.id)
+
+
+@router.patch("/models/{slug}", response_model=list[ModelOption])
+def toggle_model(
+    slug: str,
+    payload: ModelToggle,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    try:
+        return service.set_model_enabled(db, current_user.id, slug, payload.enabled)
+    except ValueError as e:
+        raise HTTPException(status_code=409, detail=str(e))
 
 
 @router.post("/conversations", response_model=ConversationOut)
@@ -73,8 +88,8 @@ async def send_message(
             db=db,
             conversation_id=str(conversation_id),
             user_id=current_user.id,
+            user_email=current_user.email,
             user_content=payload.content,
-            model=payload.model,
             api_key=api_key,
         )
     except ValueError as e:
@@ -93,7 +108,6 @@ async def send_message(
 @router.post("/conversations/{conversation_id}/retry")
 async def retry_message(
     conversation_id: UUID,
-    payload: RetryMessage,
     request: Request,
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
@@ -107,7 +121,7 @@ async def retry_message(
             db=db,
             conversation_id=str(conversation_id),
             user_id=current_user.id,
-            model=payload.model,
+            user_email=current_user.email,
             api_key=api_key,
         )
     except ValueError as e:

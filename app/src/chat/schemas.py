@@ -1,8 +1,6 @@
 from datetime import datetime
 
-from pydantic import BaseModel, field_validator
-
-from src.core.config import settings
+from pydantic import BaseModel
 
 
 class ToolCallOut(BaseModel):
@@ -46,29 +44,16 @@ class ConversationSummary(BaseModel):
 
 class SendMessage(BaseModel):
     content: str
-    model: str
-
-    @field_validator("model")
-    @classmethod
-    def validate_model(cls, v: str) -> str:
-        valid_ids = {m["id"] for m in settings.agent.get_models()}
-        if v not in valid_ids:
-            raise ValueError(f"Modelo não suportado. Use um de: {', '.join(sorted(valid_ids))}")
-        return v
 
 
-class RetryMessage(BaseModel):
-    model: str
+class ModelOption(BaseModel):
+    slug: str
+    name: str
+    priority: int
+    enabled: bool
 
-    @field_validator("model")
-    @classmethod
-    def validate_model(cls, v: str) -> str:
-        valid_ids = {m["id"] for m in settings.agent.get_models()}
-        if v not in valid_ids:
-            raise ValueError(f"Modelo não suportado. Use um de: {', '.join(sorted(valid_ids))}")
-        return v
+    model_config = {"from_attributes": True}
 
 
-class GeminiModelOption(BaseModel):
-    id: str
-    alias: str
+class ModelToggle(BaseModel):
+    enabled: bool

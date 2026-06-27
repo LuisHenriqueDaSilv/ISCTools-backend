@@ -1,7 +1,7 @@
 from sqlalchemy import func
 from sqlalchemy.orm import Session
 
-from src.chat.models import Conversation, Message, ToolCall
+from src.chat.models import AIModel, Conversation, Message, ToolCall, UserModel
 
 
 def create_conversation(db: Session, user_id: int) -> Conversation:
@@ -119,3 +119,66 @@ def add_tool_calls(db: Session, message_id: int, calls: list[dict]) -> None:
 def update_conversation_title(db: Session, conversation_id: str, title: str) -> None:
     db.query(Conversation).filter(Conversation.id == conversation_id).update({"title": title})
     db.commit()
+
+
+def _enabled_expr():
+    return func.coalesce(UserModel.enabled, True)
+
+
+def get_enabled_models_ordered(db: Session, user_id: int) -> list[AIModel]:
+    return (
+        db.query(AIModel)
+        .outerjoin(
+            UserModel,
+            (UserModel.model_id == AIModel.id) & (UserModel.user_id == user_id),
+        )
+        .filter(AIModel.is_active == True)  # noqa: E712
+        .filter(_enabled_expr() == True)  # noqa: E712
+        .order_by(AIModel.priority.asc(), AIModel.id.asc())
+        .all()
+    )
+
+
+def get_active_models_with_prefs(db: Session, user_id: int) -> list[tuple[AIModel, bool]]:
+    rows = (
+        db.query(AIModel, _enabled_expr())
+        .outerjoin(
+            UserModel,
+            (UserModel.model_id == AIModel.id) & (UserModel.user_id == user_id),
+        )
+        .filter(AIModel.is_active == True)  # noqa: E712
+        .order_by(AIModel.priority.asc(), AIModel.id.asc())
+        .all()
+    )
+    return [(model, enabled) for model, enabled in rows]
+
+
+def get_model_by_slug(db: Session, slug: str) -> AIModel | None:
+    return db.query(AIModel).filter(AIModel.slug == slug).first()
+
+
+def set_user_model(db: Session, user_id: int, model_id: int, enabled: bool) -> None:
+    existing = (
+        db.query(UserModel)
+        .filter(UserModel.user_id == user_id, UserModel.model_id == model_id)
+        .first()
+    )
+    if existing:
+        existing.enabled = enabled
+    else:
+        db.add(UserModel(user_id=user_id, model_id=model_id, enabled=enabled))
+    db.commit()
+
+
+def count_enabled_models(db: Session, user_id: int) -> int:
+    return (
+        db.query(func.count(AIModel.id))
+        .outerjoin(
+            UserModel,
+            (UserModel.model_id == AIModel.id) & (UserModel.user_id == user_id),
+        )
+        .filter(AIModel.is_active == True)  # noqa: E712
+        .filter(_enabled_expr() == True)  # noqa: E712
+        .scalar()
+        or 0
+    )
